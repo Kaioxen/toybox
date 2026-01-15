@@ -1,4 +1,4 @@
-name: Compile Toybox
+name: Compile
 
 on:
   workflow_dispatch:
@@ -13,18 +13,24 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
       
-    - name: Check config
+    - name: Setup config from config.android
       run: |
-        if [ -f ".config" ]; then
-          echo "Config found"
-          grep "=y" .config | wc -l
+        echo "=== SETUP CONFIG ==="
+        ls -la *.config* config.* 2>/dev/null || true
+        
+        if [ -f "config.android" ]; then
+          echo "Copying config.android to .config"
+          cp config.android .config
         else
-          echo "No config"
+          echo "ERROR: config.android not found!"
+          ls -la
           exit 1
         fi
         
-    - name: Regenerate
-      run: |
+        echo "=== CONFIG CHECK ==="
+        grep -E "CONFIG_(SU|LOGIN|PASSWD|STATIC|ANDROID)" .config
+        
+        echo "=== REGENERATE ==="
         make silentoldconfig
         
     - name: Get NDK
@@ -38,21 +44,23 @@ jobs:
         CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang"
         STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
         
-        make CC="$CC" CFLAGS="-static -Os -DANDROID" LDFLAGS="-static" -j4
+        echo "=== BUILDING ==="
+        make CC="$CC" CFLAGS="-static -Os -DANDROID -DNO_CRYPT" LDFLAGS="-static" -j4
         
         if [ -f "toybox" ]; then
+          echo "=== SUCCESS ==="
           $STRIP --strip-all toybox
           mkdir -p out
           cp toybox out/
-          echo "Build success"
           ls -lh out/
+          file out/toybox
         else
-          echo "Build failed"
+          echo "=== BUILD FAILED ==="
           exit 1
         fi
         
     - name: Upload
       uses: actions/upload-artifact@v4
       with:
-        name: toybox-out
+        name: toybox-android
         path: out/
