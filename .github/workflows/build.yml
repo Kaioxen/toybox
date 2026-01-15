@@ -1,0 +1,70 @@
+name: Build Toybox for Android
+
+on:
+  workflow_dispatch:  
+  push:
+    branches: [main]
+    tags: ['v*']
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout this repository
+      uses: actions/checkout@v4
+      
+    - name: Clone Toybox source
+      run: |
+        git clone --depth=1 https://github.com/landley/toybox
+        cd toybox
+        
+    - name: Download Android NDK
+      run: |
+        cd toybox
+        wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        unzip -q android-ndk-r25b-linux.zip
+        
+    - name: Build Toybox
+      id: build
+      run: |
+        cd toybox
+        export NDK="$PWD/android-ndk-r25b"
+        export TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+        export CC="$TOOLCHAIN/bin/aarch64-linux-android30-clang"
+        export STRIP="$TOOLCHAIN/bin/llvm-strip"
+        
+        # Configure
+        make defconfig
+        echo "CONFIG_STATIC=y" >> .config
+        echo "CONFIG_ANDROID=y" >> .config
+        echo "CONFIG_TOYBOX_PREFIX=\"/system/bin\"" >> .config
+        
+        # Build
+        make CC="$CC" CFLAGS="-static -Os -DANDROID" -j$(nproc)
+        
+        # Strip binary
+        $STRIP --strip-all toybox
+        
+        # Show info
+        echo "=== BUILD INFO ==="
+        file toybox
+        ls -lh toybox
+        echo "size=$(stat -c%s toybox)" >> $GITHUB_OUTPUT
+        
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          toybox/toybox
+          toybox/README
+          
+    - name: Upload Artifact (for manual runs)
+      if: github.event_name == 'workflow_dispatch'
+      uses: actions/upload-artifact@v4
+      with:
+        name: toybox-android-arm64
+        path: |
+          toybox/toybox
+        retention-days: 30
