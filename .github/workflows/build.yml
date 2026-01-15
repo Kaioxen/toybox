@@ -1,0 +1,58 @@
+name: Compile Toybox
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Check config
+      run: |
+        if [ -f ".config" ]; then
+          echo "Config found"
+          grep "=y" .config | wc -l
+        else
+          echo "No config"
+          exit 1
+        fi
+        
+    - name: Regenerate
+      run: |
+        make silentoldconfig
+        
+    - name: Get NDK
+      run: |
+        wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        unzip -q android-ndk-r25b-linux.zip
+        
+    - name: Build
+      run: |
+        NDK="$PWD/android-ndk-r25b"
+        CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang"
+        STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+        
+        make CC="$CC" CFLAGS="-static -Os -DANDROID" LDFLAGS="-static" -j4
+        
+        if [ -f "toybox" ]; then
+          $STRIP --strip-all toybox
+          mkdir -p out
+          cp toybox out/
+          echo "Build success"
+          ls -lh out/
+        else
+          echo "Build failed"
+          exit 1
+        fi
+        
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: toybox-out
+        path: out/
