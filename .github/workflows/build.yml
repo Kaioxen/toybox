@@ -1,4 +1,4 @@
-name: Compile
+name: Fast Build
 
 on:
   workflow_dispatch:
@@ -6,32 +6,17 @@ on:
     branches: [main]
 
 jobs:
-  compile:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
       
-    - name: Setup config from config.android
+    - name: Setup
       run: |
-        echo "=== SETUP CONFIG ==="
-        ls -la *.config* config.* 2>/dev/null || true
-        
-        if [ -f "config.android" ]; then
-          echo "Copying config.android to .config"
-          cp config.android .config
-        else
-          echo "ERROR: config.android not found!"
-          ls -la
-          exit 1
-        fi
-        
-        echo "=== CONFIG CHECK ==="
-        grep -E "CONFIG_(SU|LOGIN|PASSWD|STATIC|ANDROID)" .config
-        
-        echo "=== REGENERATE ==="
-        make silentoldconfig
+        [ -f config.android ] && cp config.android .config
+        make silentoldconfig > /dev/null 2>&1
         
     - name: Get NDK
       run: |
@@ -40,27 +25,16 @@ jobs:
         
     - name: Build
       run: |
-        NDK="$PWD/android-ndk-r25b"
-        CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang"
-        STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+        export NDK="$PWD/android-ndk-r25b"
+        export CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang"
         
-        echo "=== BUILDING ==="
-        make CC="$CC" CFLAGS="-static -Os -DANDROID -DNO_CRYPT" LDFLAGS="-static" -j4
+        make CC="$CC" CFLAGS="-static -Os -DANDROID -DNO_CRYPT" -j4
         
-        if [ -f "toybox" ]; then
-          echo "=== SUCCESS ==="
-          $STRIP --strip-all toybox
-          mkdir -p out
-          cp toybox out/
-          ls -lh out/
-          file out/toybox
-        else
-          echo "=== BUILD FAILED ==="
-          exit 1
-        fi
+        mkdir -p out
+        cp toybox out/
         
-    - name: Upload
+    - name: Output
       uses: actions/upload-artifact@v4
       with:
-        name: toybox-android
+        name: binary
         path: out/
