@@ -1,4 +1,4 @@
-name: Build Toybox for Android
+name: Build Toybox for Android ARM64 -2026
 
 on:
   workflow_dispatch:  
@@ -7,64 +7,106 @@ on:
     tags: ['v*']
 
 jobs:
-  build-android:
+  build:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout this repository
+    - name: Checkout repository
       uses: actions/checkout@v4
-      
-    - name: Clone Toybox source
+      with:
+        path: toybox-source
+        
+    - name: Show directory structure
       run: |
-        git clone --depth=1 https://github.com/landley/toybox
-        cd toybox
+        echo "=== CURRENT DIRECTORY ==="
+        pwd
+        ls -la
+        echo "=== TOYBOX SOURCE ==="
+        cd toybox-source
+        pwd
+        ls -la
         
     - name: Download Android NDK
       run: |
-        cd toybox
+        cd toybox-source
+        echo "=== DOWNLOADING NDK ==="
+        pwd
         wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
         unzip -q android-ndk-r25b-linux.zip
+        echo "=== NDK CONTENTS ==="
+        ls -la android-ndk-r25b/
         
-    - name: Build Toybox
-      id: build
+    - name: Configure for Android
       run: |
-        cd toybox
+        cd toybox-source
+        echo "=== CONFIGURING ==="
+        pwd
+        
+        # Setup environment
         export NDK="$PWD/android-ndk-r25b"
         export TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
         export CC="$TOOLCHAIN/bin/aarch64-linux-android30-clang"
         export STRIP="$TOOLCHAIN/bin/llvm-strip"
         
+        echo "CC=$CC"
+        echo "STRIP=$STRIP"
+        ls -la "$TOOLCHAIN/bin/" | head -10
+        
         # Configure
         make defconfig
+        
+        # Disable problematic features
         echo "CONFIG_STATIC=y" >> .config
         echo "CONFIG_ANDROID=y" >> .config
         echo "CONFIG_TOYBOX_PREFIX=\"/system/bin\"" >> .config
+        echo "CONFIG_SU=n" >> .config
+        echo "CONFIG_LOGIN=n" >> .config
+        echo "CONFIG_PASSWD=n" >> .config
+        echo "CONFIG_CHATTR=n" >> .config
         
-        # Build
-        make CC="$CC" CFLAGS="-static -Os -DANDROID" -j$(nproc)
+        echo "=== CONFIG SUMMARY ==="
+        grep -E "CONFIG_(STATIC|ANDROID|SU|LOGIN)" .config
         
-        # Strip binary
-        $STRIP --strip-all toybox
+    - name: Build Toybox
+      run: |
+        cd toybox-source
+        echo "=== BUILDING ==="
+        pwd
         
-        # Show info
-        echo "=== BUILD INFO ==="
-        file toybox
-        ls -lh toybox
-        echo "size=$(stat -c%s toybox)" >> $GITHUB_OUTPUT
+        export NDK="$PWD/android-ndk-r25b"
+        export TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+        export CC="$TOOLCHAIN/bin/aarch64-linux-android30-clang"
+        export STRIP="$TOOLCHAIN/bin/llvm-strip"
         
-    - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          toybox/toybox
-          toybox/README
-          
-    - name: Upload Artifact (for manual runs)
-      if: github.event_name == 'workflow_dispatch'
+        make CC="$CC" \
+             CFLAGS="-static -Os -DANDROID -DNO_CRYPT" \
+             LDFLAGS="-static" \
+             -j$(nproc)
+        
+        # Check if build succeeded
+        if [ -f "toybox" ]; then
+            echo "=== BUILD SUCCESS ==="
+            # Strip
+            $STRIP --strip-all toybox
+            
+            # Info
+            echo "Binary info:"
+            file toybox
+            ls -lh toybox
+            stat -c%s toybox
+            
+            # Quick test
+            ./toybox echo "Build successful!"
+            ./toybox ls -la | head -3
+        else
+            echo "=== BUILD FAILED ==="
+            ls -la
+            exit 1
+        fi
+        
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: toybox-android-arm64
-        path: |
-          toybox/toybox
+        path: toybox-source/toybox
         retention-days: 30
